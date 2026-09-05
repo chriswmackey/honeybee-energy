@@ -688,7 +688,7 @@ class WindowConstruction(_ConstructionBase):
         con_id = gbxml_element.get('id').replace('_', ' ')
         t_vis = gbxml_element.find('Transmittance').text
         xml_u_factor = gbxml_element.find('U-value')
-        u_factor, u_unit = xml_u_factor.text, xml_u_factor.get('unit')
+        u_factor, u_unit = float(xml_u_factor.text), xml_u_factor.get('unit')
         if u_unit == 'BtuPerHourSquareFtF':
             u_factor = UValue().to_si([u_factor], 'Btu/h-ft2-F')[0][0]
         shgc = gbxml_element.find('SolarHeatGainCoeff').text
@@ -1017,6 +1017,51 @@ class WindowConstruction(_ConstructionBase):
             for construct in constructions:
                 construct.frame = frame_materials[0]
         return constructions, materials + frame_materials
+
+    @staticmethod
+    def extract_all_from_gbxml_file(gbxml_file):
+        """Extract all WindowConstruction objects from an EnergyPlus gbXML file.
+
+        Args:
+            gbxml_file: A path to an gbXML file containing objects for opaque
+                constructions and corresponding materials.
+
+        Returns:
+            A tuple with two elements
+
+            -   constructions: A list of all WindowConstruction objects in the gbXML
+                file as honeybee_energy WindowConstruction objects.
+
+            -   materials: A list of all simple glazing materials in the gbXML file as
+                honeybee_energy EnergyWindowMaterialSimpleGlazSys objects.
+        """
+        # register all of the namespaces within OpenStudio-exported XMLs
+        ET.register_namespace('', 'http://www.gbxml.org/schema')
+        ET.register_namespace('xhtml', 'http://www.w3.org/1999/xhtml')
+        ET.register_namespace('xsi', 'http://www.w3.org/2001/XMLSchema-instance')
+        ET.register_namespace('xsd', 'http://www.w3.org/2001/XMLSchema')
+
+        # load the file to an element tree
+        tree = ET.parse(gbxml_file)
+        root = tree.getroot()
+        gbxml_header = r'{http://www.gbxml.org/schema}'
+
+        # extract all of the construction objects
+        constructions = []
+        for con_element in root.findall(gbxml_header + 'Construction'):
+            # Recursively strip namespaces from tags to make them parse-able
+            for elem in con_element.iter():
+                if '}' in elem.tag:
+                    elem.tag = elem.tag.split('}', 1)[1]
+            layers = con_element.findall('LayerId')
+            if len(layers) == 0:
+                continue  # air boundary construction with no layers
+            con = OpaqueConstruction.from_gbxml_element(con_element, materials)
+            constructions.append(con)
+
+        # return all constructions and material definitions
+        materials = [mat for mat in materials.values() if not isinstance(mat, list)]
+        return constructions, materials
 
     def lock(self):
         """The lock() method will also lock the materials."""
